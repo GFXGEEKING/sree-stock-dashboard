@@ -38,8 +38,21 @@ ufw status                          # firewall
 - TLS cert via certbot --nginx (registered without email).
 - Frontend is built once per deploy (no Node process at runtime).
 
-## GitHub mirror (optional)
-`git push vps main` is the deployment channel. To also publish on GitHub:
-1. Create an empty repo on github.com (no README).
-2. Add your SSH public key: `cat ~/.ssh/id_ed25519.pub` → GitHub → Settings → SSH keys.
-3. `git remote add github git@github.com:<user>/sree-stock-dashboard.git && git push -u github main`
+## GitHub (primary mirror)
+
+The repo is published at **https://github.com/GFXGEEKING/sree-stock-dashboard**
+(remote name `github`, branch `main`). Push to both remotes when changing code:
+
+```bash
+git push github main   # GitHub (public mirror + history)
+git push vps main      # VPS bare repo (deployment source)
+```
+
+or both at once:  `git push github main && git push vps main`
+
+### Deploying a GitHub change to the VPS
+```bash
+# On the VPS, the app clones from the local bare repo; refresh it from GitHub first:
+ssh root@13.140.141.93 'cd /srv/git/sree-stocks.git && git fetch https://github.com/GFXGEEKING/sree-stock-dashboard.git main:main && cd /opt/sree-stocks && bash deploy/deploy-vps.sh'
+```
+
