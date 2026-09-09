@@ -45,6 +45,10 @@ systemctl restart sree-stocks.service
 echo "==> nginx site"
 cp "$APP_DIR/deploy/nginx-sree-stocks.conf" "/etc/nginx/sites-available/sree-stocks"
 ln -sf "/etc/nginx/sites-available/sree-stocks" "/etc/nginx/sites-enabled/sree-stocks"
+# If a Let's Encrypt cert exists, ensure it stays configured after updates
+if [ -f /etc/letsencrypt/live/$DOMAIN/fullchain.pem ] && ! grep -q "ssl_certificate" /etc/nginx/sites-available/sree-stocks; then
+  echo "WARNING: cert exists but site config has no SSL block — re-run certbot" >&2
+fi
 nginx -t
 systemctl reload nginx
 
