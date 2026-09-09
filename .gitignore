@@ -34,7 +34,6 @@ Thumbs.db
 
 # Misc
 get-pip.py
-package-lock.json
 
 # Deployment / data
 backend/data/
