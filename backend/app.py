@@ -80,6 +80,7 @@ async def start_background_services():
     browser tab is open (the single biggest v1 gap).
     """
     try:
+        data_fetcher.init_db()
         pt.init_db()
         perf.init_db()
         scan_history.init_db()
