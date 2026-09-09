@@ -1,0 +1,46 @@
+# Python
+backend/venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+.pytest_cache/
+
+# Node
+node_modules/
+frontend/node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-store/
+
+# Runtime
+.runtime/
+*.log
+server.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.continue/
+
+# Misc
+get-pip.py
+package-lock.json
+
+# Deployment / data
+backend/data/
+frontend/dist/
+backend/tests/_test_stocks.db
+backend/venv/
+.env
+.env.*
+!.env.example
