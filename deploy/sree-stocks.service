@@ -1,0 +1,18 @@
+[Unit]
+Description=Sree Stock Trading Dashboard (FastAPI backend + scheduler)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/sree-stocks
+# Single worker REQUIRED: SQLite + one APScheduler instance.
+# Multiple workers would duplicate the agent/stop-monitor and race the DB.
+ExecStart=/opt/sree-stocks/backend/venv/bin/python -m uvicorn backend.app:app --host 127.0.0.1 --port 8000 --workers 1
+Restart=always
+RestartSec=5
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
