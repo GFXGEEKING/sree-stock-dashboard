@@ -201,3 +201,86 @@ def test_ml_cold_start_heuristic():
     blended = ml_scorer.blend_score(80.0, pred["probability"])
     assert 40.0 <= blended <= 100.0
 
+
+# ----------------------------------------------------------------------
+# Agent Phase 1 hardening: volatility regime + liquidity gates
+# ----------------------------------------------------------------------
+
+from backend.services import agent as ag  # noqa: E402
+
+
+@pytest.fixture
+def clean_state():
+    return {
+        "equity": 10000.0, "cash": 10000.0, "held_symbols": [],
+        "guardrails_ok": True, "guardrail_reasons": [],
+        "market_regime_ok": True, "volatility_regime_ok": True,
+        "avg_volumes": {},  # pre-computed avg volumes (tests inject here)
+    }
+
+
+def _liq_candidate(**kw):
+    base = {"ticker": "TEST", "current_price": 150.0, "blended_score": 85.0,
+            "ml_probability": 0.75, "avg_volume": 5_000_000}
+    base.update(kw)
+    return base
+
+
+def test_liquid_candidate_passes_all_gates(clean_state):
+    clean_state["avg_volumes"] = {}
+    d = ag.decide_entry(_liq_candidate(ticker="TESTL", avg_volume=5_000_000), clean_state)
+    # earnings/correlation filters may hit the network for unknown symbols;
+    # if they pass, the liquidity gate must NOT be the blocker
+    if d["decision"] == "SKIP":
+        assert not any("liquidity" in r for r in d["reasons"]), d["reasons"]
+    else:
+        assert d["decision"] == "ENTRY"
+
+
+def test_illiquid_candidate_blocked_by_liquidity_gate(clean_state):
+    clean_state["avg_volumes"] = {}
+    d = ag.decide_entry(_liq_candidate(ticker="ILLIQ.X", avg_volume=100_000), clean_state)
+    assert d["decision"] == "SKIP"
+    assert any("liquidity" in r for r in d["reasons"]), d["reasons"]
+
+
+def test_unknown_volume_fails_closed(clean_state):
+    clean_state["avg_volumes"] = {"NOVOL.X": None}
+    cand = _liq_candidate(ticker="NOVOL.X")
+    cand.pop("avg_volume")
+    d = ag.decide_entry(cand, clean_state)
+    assert d["decision"] == "SKIP"
+    assert any("insufficient volume data" in r for r in d["reasons"]), d["reasons"]
+
+
+def test_volatility_regime_false_blocks_entry(clean_state):
+    clean_state["avg_volumes"] = {}
+    st = dict(clean_state, volatility_regime_ok=False)
+    d = ag.decide_entry(_liq_candidate(ticker="VIXB.X", avg_volume=5_000_000), st)
+    assert d["decision"] == "SKIP"
+    assert any("volatility regime" in r for r in d["reasons"]), d["reasons"]
+
+
+def test_avg_volume_from_cache(clean_state):
+    import time as _time
+    conn = sqlite3.connect(TMP_DB)
+    try:
+        today = datetime.utcnow().date()
+        for k in range(30):
+            d = (today - timedelta(days=k)).isoformat()
+            conn.execute(
+                "INSERT OR REPLACE INTO daily_candles (symbol, date, open, high, low, close, "
+                "adj_close, volume) VALUES (?,?,?,?,?,?,?,?)",
+                ("LIQ.X", d, 100, 101, 99, 100, 100, 1_000_000 + k),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+    av = ag._avg_volume_from_cache("LIQ.X")
+    assert av is not None and av >= 1_000_000, av
+
+
+def test_avg_volume_unknown_symbol_returns_none():
+    assert ag._avg_volume_from_cache("ZZNOVOL.X") is None
+
+

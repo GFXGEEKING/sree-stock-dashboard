@@ -44,6 +44,9 @@ TIME_STOP_DAYS = int(os.getenv("AGENT_TIME_STOP_DAYS", "20"))
 DAILY_LOSS_HALT_PCT = float(os.getenv("AGENT_DAILY_LOSS_HALT_PCT", "3"))
 DRAWDOWN_PAUSE_PCT = float(os.getenv("AGENT_DRAWDOWN_PAUSE_PCT", "10"))
 SCORE_EXIT_LEVEL = float(os.getenv("AGENT_SCORE_EXIT_LEVEL", "35"))
+MIN_AVG_VOLUME = int(os.getenv("AGENT_MIN_AVG_VOLUME", "500000"))  # 30d avg shares/day
+VIX_HIGH = float(os.getenv("AGENT_VIX_HIGH", "35"))  # panic regime — no new entries
+VIX_CHOP = float(os.getenv("AGENT_VIX_CHOP", "20"))  # 20d VIX stdev threshold
 
 
 def _get_conn() -> sqlite3.Connection:
@@ -313,6 +316,54 @@ def _market_regime_ok() -> Optional[bool]:
         return None
 
 
+def _volatility_regime_ok() -> Optional[bool]:
+    """None = unknown (allow), True = tradable volatility, False = blocked.
+
+    Two-part volatility filter:
+      * Level: VIX >= VIX_HIGH (panic) → block new entries.
+      * Stability: 20-day stdev of VIX daily returns > VIX_CHOP/100
+        (regime whipsaw) → block new entries.
+    """
+    try:
+        import yfinance as yf
+
+        hist = yf.Ticker("^VIX").history(period="6mo")
+        if hist is None or hist.empty:
+            return None
+        close = hist["Close"].dropna()
+        if len(close) < 40:
+            return None
+        level = float(close.iloc[-1])
+        vol20 = float(close.pct_change().dropna().rolling(20).std().iloc[-1] or 0.0)
+        if level >= VIX_HIGH or vol20 * 100 >= VIX_CHOP:
+            logger.info(f"volatility regime blocked: VIX={level:.1f}, 20d vol={vol20*100:.1f}%")
+            return False
+        return True
+    except Exception as e:
+        logger.debug(f"volatility regime check failed: {e}")
+        return None
+
+
+def _avg_volume_from_cache(symbol: str) -> Optional[int]:
+    """30-day average daily volume from cached candles (no network)."""
+    try:
+        conn = _get_conn()
+        try:
+            rows = conn.execute(
+                "SELECT volume FROM daily_candles WHERE symbol = ? ORDER BY date DESC LIMIT 30",
+                ((symbol or "").upper(),),
+            ).fetchall()
+        finally:
+            conn.close()
+        vols = [int(r["volume"] or 0) for r in rows if r["volume"] is not None]
+        if len(vols) < 10:
+            return None
+        return int(sum(vols) / len(vols))
+    except Exception as e:
+        logger.debug(f"avg volume failed for {symbol}: {e}")
+        return None
+
+
 # ----------------------------------------------------------------------
 # Entry decision (deterministic — shared with the backtester)
 # ----------------------------------------------------------------------
@@ -388,6 +439,21 @@ def decide_entry(candidate: Dict, portfolio_state: Dict) -> Dict:
     regime = portfolio_state.get("market_regime_ok")
     if regime is False:
         reasons.append("market regime risk-off (S&P below 200d MA)")
+
+    # 2b. Volatility regime (panic VIX / whipsaw → no new entries)
+    if portfolio_state.get("volatility_regime_ok") is False:
+        reasons.append("volatility regime: VIX extreme or unstable (new entries blocked)")
+
+    # 2c. Liquidity gate — must be able to exit the position cleanly
+    avg_vol = candidate.get("avg_volume")
+    if avg_vol is None:
+        avg_vol = (portfolio_state.get("avg_volumes") or {}).get(symbol)
+    if avg_vol is None:
+        avg_vol = _avg_volume_from_cache(symbol)
+    if avg_vol is not None and int(avg_vol) < MIN_AVG_VOLUME:
+        reasons.append(f"liquidity: 30d avg volume {int(avg_vol):,} < {MIN_AVG_VOLUME:,}")
+    if avg_vol is None:
+        reasons.append("liquidity: insufficient volume data (avg volume unknown)")
 
     # 3. Guardrails
     if not portfolio_state.get("guardrails_ok", True):
@@ -515,6 +581,7 @@ def run_cycle(mode: Optional[str] = None) -> Dict:
             "guardrails_ok": g["ok"],
             "guardrail_reasons": g["reasons"],
             "market_regime_ok": _market_regime_ok(),
+            "volatility_regime_ok": _volatility_regime_ok(),
             "rankings": rankings,
         }
 
@@ -680,6 +747,8 @@ def status() -> Dict:
             "daily_loss_halt_pct": DAILY_LOSS_HALT_PCT,
             "drawdown_pause_pct": DRAWDOWN_PAUSE_PCT,
             "score_exit_level": SCORE_EXIT_LEVEL,
+            "min_avg_volume": MIN_AVG_VOLUME,
+            "vix_high": VIX_HIGH, "vix_chop": VIX_CHOP,
         },
     }
 
