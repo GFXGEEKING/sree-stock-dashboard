@@ -223,6 +223,93 @@ def get_training_data(horizon_days: int = 10) -> List[Dict]:
     return training_rows
 
 
+def pick_performance(days: int = 30) -> Dict:
+    """How did graded picks actually perform AFTER being listed?
+
+    For every snapshot row (one ticker per day, last `days` days), grade the
+    pick from its breakout score, then measure the price change from the pick
+    to the latest cached close (requiring >= 2 candles after the pick date so
+    the pick has had time to move). Aggregated per grade bucket.
+
+    Note: this measures raw price change since listing — NOT a stop-managed
+    trade — so it answers "does the grade predict direction?", not P&L.
+    """
+    from . import pick_grader
+
+    init_db()
+    conn = _get_conn()
+    try:
+        snaps = conn.execute(
+            "SELECT date, ticker, breakout_score, composite_score, price "
+            "FROM scan_snapshots WHERE date < ? ORDER BY date ASC",
+            (datetime.utcnow().strftime("%Y-%m-%d"),),
+        ).fetchall()
+        # Keep only the newest snapshot per (date, ticker) — re-scans overwrite,
+        # but be safe if duplicates exist from before that rule.
+        seen = set()
+        picks = []
+        for s in snaps:
+            key = (s["date"], s["ticker"])
+            if key in seen:
+                continue
+            seen.add(key)
+            picks.append(s)
+
+        candles: Dict[str, Dict[str, float]] = {}
+        per_grade: Dict[str, Dict] = {}
+        n_total = 0
+        for s in picks:
+            sym = s["ticker"]
+            if sym not in candles:
+                crows = conn.execute(
+                    "SELECT date, close FROM daily_candles WHERE symbol = ? ORDER BY date",
+                    (sym,),
+                ).fetchall()
+                candles[sym] = [(r["date"], r["close"]) for r in crows]
+            series = candles.get(sym, [])
+            # closes strictly after the pick date
+            after = [c for d, c in series if d > s["date"] and c]
+            if len(after) < 2 or not s["price"]:
+                continue
+            ret = (after[-1] / float(s["price"])) - 1.0
+            score = s["breakout_score"] or s["composite_score"] or 0
+            grade = pick_grader.grade_from_score(score)
+            g = per_grade.setdefault(grade, {
+                "n_picks": 0, "wins": 0, "sum_return": 0.0,
+                "best_pct": None, "worst_pct": None,
+            })
+            g["n_picks"] += 1
+            n_total += 1
+            if ret > 0:
+                g["wins"] += 1
+            g["sum_return"] += ret
+            rp = round(ret * 100.0, 2)
+            g["best_pct"] = rp if g["best_pct"] is None else max(g["best_pct"], rp)
+            g["worst_pct"] = rp if g["worst_pct"] is None else min(g["worst_pct"], rp)
+
+        grades_out = {}
+        for grade in pick_grader.GRADES:
+            g = per_grade.get(grade)
+            if not g:
+                continue
+            n = g["n_picks"]
+            grades_out[grade] = {
+                "n_picks": n,
+                "avg_return_pct": round(g["sum_return"] / n * 100.0, 2) if n else 0.0,
+                "win_rate_pct": round(g["wins"] / n * 100.0, 1) if n else 0.0,
+                "best_pct": g["best_pct"],
+                "worst_pct": g["worst_pct"],
+            }
+        return {
+            "days": days,
+            "n_picks_tracked": n_total,
+            "grades": grades_out,
+            "note": "Raw price change since listing (no stop management) — measures whether the grade predicts direction.",
+        }
+    finally:
+        conn.close()
+
+
 __all__ = [
     "init_db", "save_snapshot", "snapshot_from_cache", "get_history",
     "score_change", "get_distinct_days", "get_training_data",

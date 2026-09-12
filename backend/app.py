@@ -550,6 +550,14 @@ async def alerts_channels():
 # PERFORMANCE METRICS
 # ======================================================================
 
+@app.get("/api/paper/pick-performance", tags=["Paper Trading"])
+async def paper_pick_performance(days: int = 30):
+    """How graded picks performed after being listed, aggregated by grade."""
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(executor, lambda: scan_history.pick_performance(days=days))
+    return remove_nan(result)
+
+
 @app.get("/api/paper/metrics", tags=["Paper Trading"])
 async def paper_metrics():
     """Sharpe/Sortino/drawdown/expectancy/profit-factor for the paper account."""

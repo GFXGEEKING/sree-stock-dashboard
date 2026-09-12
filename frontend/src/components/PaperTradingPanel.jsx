@@ -71,6 +71,24 @@ export default function PaperTradingPanel() {
   const [suggestion, setSuggestion] = useState(null)
   // Performance metrics (Sharpe/Sortino/drawdown/expectancy/PF)
   const [metrics, setMetrics] = useState(null)
+  // Grade-level pick performance tracking (does the grade predict direction?)
+  const [pickPerf, setPickPerf] = useState(null)
+
+  const fetchPickPerf = useCallback(async () => {
+    try {
+      const res = await fetch(`${API}/api/paper/pick-performance?days=30`)
+      if (!res.ok) return
+      setPickPerf(await res.json())
+    } catch (e) {
+      // non-fatal
+    }
+  }, [])
+
+  useEffect(() => {
+    fetchPickPerf()
+    const interval = setInterval(fetchPickPerf, 300000)
+    return () => clearInterval(interval)
+  }, [fetchPickPerf])
 
   const fetchMetrics = useCallback(async () => {
     try {
@@ -790,6 +808,56 @@ export default function PaperTradingPanel() {
           </table>
         </div>
       </section>
+
+      {/* ===== Pick performance by grade ===== */}
+      {pickPerf && pickPerf.n_picks_tracked > 0 && (
+        <section className="bg-slate-900/60 border border-slate-800 rounded-2xl">
+          <div className="px-5 py-4 border-b border-slate-800">
+            <h2 className="text-lg font-semibold flex items-center gap-2">
+              <History className="w-4 h-4 text-violet-400" /> Pick Performance by Grade
+            </h2>
+            <p className="text-xs text-slate-400 mt-0.5">
+              How listed picks moved after appearing here (last {pickPerf.days}d · {pickPerf.n_picks_tracked} tracked). Raw price change since listing — measures whether the grade predicts direction.
+            </p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-900/80 text-slate-400 uppercase text-xs tracking-wider">
+                <tr>
+                  <th className="text-left px-5 py-2.5">Grade</th>
+                  <th className="text-right px-3 py-2.5">Picks</th>
+                  <th className="text-right px-3 py-2.5">Avg Move</th>
+                  <th className="text-right px-3 py-2.5">Win Rate</th>
+                  <th className="text-right px-3 py-2.5">Best</th>
+                  <th className="text-right px-5 py-2.5">Worst</th>
+                </tr>
+              </thead>
+              <tbody>
+                {Object.entries(pickPerf.grades).map(([g, v]) => (
+                  <tr key={g} className="border-t border-slate-800/70">
+                    <td className="px-5 py-2">
+                      <span className={`px-1.5 py-0.5 rounded border text-[10px] font-bold ${gradeColor(g)}`}>{g}</span>
+                    </td>
+                    <td className="px-3 py-2 text-right font-mono">{v.n_picks}</td>
+                    <td className={`px-3 py-2 text-right font-mono ${v.avg_return_pct >= 0 ? "text-emerald-300" : "text-rose-300"}`}>
+                      {v.avg_return_pct > 0 ? "+" : ""}{v.avg_return_pct}%
+                    </td>
+                    <td className={`px-3 py-2 text-right font-mono ${v.win_rate_pct >= 50 ? "text-emerald-300" : "text-rose-300"}`}>
+                      {v.win_rate_pct}%
+                    </td>
+                    <td className="px-3 py-2 text-right font-mono text-emerald-400/80">
+                      {v.best_pct != null ? `+${v.best_pct}%` : "—"}
+                    </td>
+                    <td className="px-5 py-2 text-right font-mono text-rose-400/80">
+                      {v.worst_pct != null ? `${v.worst_pct}%` : "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
 
       {/* ===== Performance metrics ===== */}
       {metrics && (
