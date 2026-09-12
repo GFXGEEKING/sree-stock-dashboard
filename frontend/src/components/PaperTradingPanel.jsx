@@ -68,6 +68,24 @@ export default function PaperTradingPanel() {
   const [equityCurve, setEquityCurve] = useState(null)
   // Size suggestion result
   const [suggestion, setSuggestion] = useState(null)
+  // Performance metrics (Sharpe/Sortino/drawdown/expectancy/PF)
+  const [metrics, setMetrics] = useState(null)
+
+  const fetchMetrics = useCallback(async () => {
+    try {
+      const res = await fetch(`${API}/api/paper/metrics`)
+      if (!res.ok) return
+      setMetrics(await res.json())
+    } catch (e) {
+      // non-fatal
+    }
+  }, [])
+
+  useEffect(() => {
+    fetchMetrics()
+    const interval = setInterval(fetchMetrics, 60000)
+    return () => clearInterval(interval)
+  }, [fetchMetrics])
 
   const fetchPortfolio = useCallback(async () => {
     try {
@@ -658,6 +676,100 @@ export default function PaperTradingPanel() {
           </table>
         </div>
       </section>
+
+      {/* ===== Performance metrics ===== */}
+      {metrics && (
+        <section className="bg-slate-900/60 border border-slate-800 rounded-2xl">
+          <div className="px-5 py-4 border-b border-slate-800">
+            <h2 className="text-lg font-semibold flex items-center gap-2">
+              <LineChart className="w-4 h-4 text-emerald-400" /> Performance Summary
+            </h2>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Risk-adjusted metrics and trade statistics across all closed paper trades.
+            </p>
+          </div>
+          <div className="p-5 grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3 text-sm">
+            <div className="bg-slate-800/50 border border-slate-700 rounded-lg px-3 py-2">
+              <div className="text-xs text-slate-400">Sharpe</div>
+              <div className={`font-bold ${metrics.risk?.sharpe == null ? "text-slate-500" : metrics.risk.sharpe >= 1 ? "text-emerald-300" : metrics.risk.sharpe >= 0 ? "text-amber-300" : "text-rose-300"}`}>
+                {metrics.risk?.sharpe ?? "—"}
+              </div>
+            </div>
+            <div className="bg-slate-800/50 border border-slate-700 rounded-lg px-3 py-2">
+              <div className="text-xs text-slate-400">Sortino</div>
+              <div className={`font-bold ${metrics.risk?.sortino == null ? "text-slate-500" : metrics.risk.sortino >= 1 ? "text-emerald-300" : metrics.risk.sortino >= 0 ? "text-amber-300" : "text-rose-300"}`}>
+                {metrics.risk?.sortino ?? "—"}
+              </div>
+            </div>
+            <div className="bg-slate-800/50 border border-slate-700 rounded-lg px-3 py-2">
+              <div className="text-xs text-slate-400">Max Drawdown</div>
+              <div className="font-bold text-rose-300">
+                {metrics.risk?.max_drawdown_pct != null ? `${metrics.risk.max_drawdown_pct}%` : "—"}
+              </div>
+            </div>
+            <div className="bg-slate-800/50 border border-slate-700 rounded-lg px-3 py-2">
+              <div className="text-xs text-slate-400">Ann. Vol</div>
+              <div className="font-bold">
+                {metrics.risk?.volatility_annual_pct != null ? `${metrics.risk.volatility_annual_pct}%` : "—"}
+              </div>
+            </div>
+            <div className="bg-slate-800/50 border border-slate-700 rounded-lg px-3 py-2">
+              <div className="text-xs text-slate-400">Win Rate</div>
+              <div className={`font-bold ${metrics.trades?.win_rate_pct >= 50 ? "text-emerald-300" : "text-rose-300"}`}>
+                {metrics.trades?.win_rate_pct ?? 0}%
+              </div>
+            </div>
+            <div className="bg-slate-800/50 border border-slate-700 rounded-lg px-3 py-2">
+              <div className="text-xs text-slate-400">Expectancy</div>
+              <div className={`font-bold ${(metrics.trades?.expectancy_eur ?? 0) >= 0 ? "text-emerald-300" : "text-rose-300"}`}>
+                {metrics.trades?.expectancy_eur != null ? `€${metrics.trades.expectancy_eur}` : "—"}
+              </div>
+            </div>
+            <div className="bg-slate-800/50 border border-slate-700 rounded-lg px-3 py-2">
+              <div className="text-xs text-slate-400">Profit Factor</div>
+              <div className={`font-bold ${(metrics.trades?.profit_factor ?? 0) >= 1 ? "text-emerald-300" : "text-rose-300"}`}>
+                {metrics.trades?.profit_factor ?? "—"}
+              </div>
+            </div>
+            <div className="bg-slate-800/50 border border-slate-700 rounded-lg px-3 py-2">
+              <div className="text-xs text-slate-400">Closed Trades</div>
+              <div className="font-bold">{metrics.trades?.closed_trades ?? 0}</div>
+            </div>
+          </div>
+
+      <div className="px-5 pb-5 grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3 text-sm">
+            <div className="bg-slate-800/20 border border-slate-800 rounded-lg px-3 py-2">
+              <div className="text-xs text-slate-500">Avg Win</div>
+              <div className="font-mono">{metrics.trades?.avg_win_eur != null ? `€${metrics.trades.avg_win_eur}` : "—"}</div>
+            </div>
+            <div className="bg-slate-800/20 border border-slate-800 rounded-lg px-3 py-2">
+              <div className="text-xs text-slate-500">Avg Loss</div>
+              <div className="font-mono text-rose-300">{metrics.trades?.avg_loss_eur != null ? `€${metrics.trades.avg_loss_eur}` : "—"}</div>
+            </div>
+            <div className="bg-slate-800/20 border border-slate-800 rounded-lg px-3 py-2">
+              <div className="text-xs text-slate-500">Best Trade</div>
+              <div className="font-mono text-emerald-300">{metrics.trades?.best_eur != null ? `€${metrics.trades.best_eur}` : "—"}</div>
+            </div>
+            <div className="bg-slate-800/20 border border-slate-800 rounded-lg px-3 py-2">
+              <div className="text-xs text-slate-500">Worst Trade</div>
+              <div className="font-mono text-rose-300">{metrics.trades?.worst_eur != null ? `€${metrics.trades.worst_eur}` : "—"}</div>
+            </div>
+            <div className="bg-slate-800/20 border border-slate-800 rounded-lg px-3 py-2">
+              <div className="text-xs text-slate-500">Avg Hold</div>
+              <div className="font-mono">{metrics.trades?.avg_hold_days != null ? `${metrics.trades.avg_hold_days}d` : "—"}</div>
+            </div>
+            <div className="bg-slate-800/20 border border-slate-800 rounded-lg px-3 py-2">
+              <div className="text-xs text-slate-500">Open Positions</div>
+              <div className="font-mono">{metrics.current?.open_positions ?? 0}</div>
+            </div>
+          </div>
+          {metrics.trades?.closed_trades === 0 && (
+            <div className="px-5 pb-5 text-xs text-slate-500">
+              No closed trades yet — metrics populate as positions are closed.
+            </div>
+          )}
+        </section>
+      )}
 
       {/* ===== Trade history ===== */}
       <section className="bg-slate-900/60 border border-slate-800 rounded-2xl overflow-hidden">
