@@ -289,6 +289,19 @@ export default function PaperTradingPanel() {
   const positions = portfolio?.open_positions || []
   const history = portfolio?.trade_history || []
   const pnlColor = (v) => (v > 0 ? "text-emerald-400" : v < 0 ? "text-rose-400" : "text-slate-400")
+  // Inline auto-size mirror of /api/paper/suggest-size (risk 1.5%, stop -6%, cap 10%)
+  const autoSize = (s) => {
+    const price = Number(s.current_price || s.price)
+    const equity = Number(stats.equity || 10000)
+    if (!price || price <= 0 || !equity) return null
+    const rps = price * 0.06 // -6% guardrail stop
+    const shares = Math.max(0, Math.min(
+      Math.floor((equity * 0.015) / rps),
+      Math.floor((equity * 0.10) / price)
+    ))
+    return { shares, eur: shares * price }
+  }
+
   // Grade badge color per pick grade
   const gradeColor = (g) => ({
     STRONG: "bg-emerald-500/15 text-emerald-300 border-emerald-500/40",
@@ -591,27 +604,23 @@ export default function PaperTradingPanel() {
             <thead className="bg-slate-900/80 text-slate-400 uppercase text-xs tracking-wider sticky top-0">
               <tr>
                 <th className="text-left px-5 py-3">#</th>
-                <th className="text-left px-3 py-3">Ticker</th>
-                <th className="text-left px-3 py-3">Name</th>
-                <th className="text-left px-3 py-3">Region</th>
-                <th className="text-right px-3 py-3">Price</th>
+                <th className="text-left px-3 py-3">Recommendation</th>
+                <th className="text-right px-3 py-3">Entry</th>
                 <th className="text-right px-3 py-3">Day %</th>
-                <th className="text-right px-3 py-3">Score</th>
-                <th className="text-center px-3 py-3">Grade</th>
                 <th className="text-center px-5 py-3">Trade</th>
               </tr>
             </thead>
             <tbody>
               {topLoading && topStocks.length === 0 ? (
                 <tr>
-                  <td colSpan="9" className="text-center py-10 text-slate-400">
+                  <td colSpan="5" className="text-center py-10 text-slate-400">
                     <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2" />
                     Loading scanner rankings…
                   </td>
                 </tr>
               ) : topStocks.length === 0 ? (
                 <tr>
-                  <td colSpan="9" className="text-center py-10 text-slate-500">
+                  <td colSpan="5" className="text-center py-10 text-slate-500">
                     No scanner data available — try Refresh or another region.
                   </td>
                 </tr>
@@ -643,15 +652,45 @@ export default function PaperTradingPanel() {
                         </span>
                       </td>
                       <td className="px-3 py-2">
-                        <div className="font-mono font-semibold">{s.ticker}</div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span
+                            className="font-mono font-bold text-sm"
+                            title={s.name || s.ticker}
+                          >
+                            {s.ticker}
+                          </span>
+                          <span className="px-1.5 py-0.5 rounded bg-sky-500/10 border border-sky-500/30 text-sky-300 text-[10px] font-semibold">
+                            long
+                          </span>
+                          <span className={`px-1.5 py-0.5 rounded border text-[10px] font-bold ${gradeColor(s.grade)}`}>
+                            {s.grade || "—"}
+                          </span>
+                          <span className="text-xs text-slate-400">
+                            Score <span className="font-mono text-sky-300">{s.score != null ? Number(s.score).toFixed(1) : "—"}</span>
+                            <span className="text-slate-600"> · </span>
+                            <span className="text-emerald-300">RR 2.5</span>
+                          </span>
+                        </div>
                         {s.summary && (
-                          <div className="text-[10px] text-slate-500 mt-0.5 max-w-56 truncate" title={`💡 ${s.summary}`}>
-                            💡 {s.summary}
+                          <div className="text-xs text-slate-300 mt-1" title={`💡 ${s.summary}`}>
+                            💡 <span className="italic">{s.summary}</span>
                           </div>
                         )}
+                        {(() => {
+                          const au = autoSize(s)
+                          return au && au.shares > 0 ? (
+                            <div className="text-[11px] text-slate-500 mt-0.5">
+                              Auto: €{au.eur.toFixed(2)} · RR 2.5
+                              {s.ml_probability != null && (
+                                <span> · Prob {Math.round(s.ml_probability * 100)}%</span>
+                              )}
+                              {s.current_price != null && (
+                                <span> · Entry €{Number(s.current_price).toFixed(2)}</span>
+                              )}
+                            </div>
+                          ) : null
+                        })()}
                       </td>
-                      <td className="px-3 py-2 text-slate-200">{s.name || "—"}</td>
-                      <td className="px-3 py-2 text-slate-400 text-xs">{s.region}</td>
                       <td className="px-3 py-2 text-right font-mono">{fmtEur0(s.current_price)}</td>
                       <td
                         className={`px-3 py-2 text-right font-mono ${
@@ -659,14 +698,6 @@ export default function PaperTradingPanel() {
                         }`}
                       >
                         {change != null ? `${Number(change).toFixed(2)}%` : "—"}
-                      </td>
-                      <td className="px-3 py-2 text-right font-mono text-sky-300">
-                        {s.composite_score != null ? Number(s.composite_score).toFixed(3) : "—"}
-                      </td>
-                      <td className="px-3 py-2 text-center">
-                        <span className={`px-1.5 py-0.5 rounded border text-[10px] font-bold ${gradeColor(s.grade)}`}>
-                          {s.grade || "—"}
-                        </span>
                       </td>
                       <td className="px-5 py-2 text-center">
                         <button
