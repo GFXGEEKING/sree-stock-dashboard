@@ -727,6 +727,42 @@ def reject_proposal(item_id: int) -> Dict:
     return {"ok": True}
 
 
+def filters() -> Dict:
+    """Live status of hardening filters (VIX regime + liquidity)."""
+    try:
+        vol_ok = _volatility_regime_ok()
+        vix_level = None
+        vix_chop = None
+        try:
+            import yfinance as yf
+            hist = yf.Ticker("^VIX").history(period="6mo")["Close"].dropna()
+            if len(hist) >= 1:
+                vix_level = float(hist.iloc[-1])
+            if len(hist) >= 40:
+                vix_chop = float(hist.pct_change().dropna().rolling(20).std().iloc[-1] * 100)
+        except Exception:
+            pass
+        return {
+            "volatility_regime_ok": vol_ok,
+            "vix_level": vix_level,
+            "vix_high_threshold": VIX_HIGH,
+            "vix_chop_threshold": VIX_CHOP,
+            "vix_chop_current": vix_chop,
+            "min_avg_volume": MIN_AVG_VOLUME,
+        }
+    except Exception as e:
+        logger.debug(f"filters status failed: {e}")
+        return {
+            "volatility_regime_ok": None,
+            "vix_level": None,
+            "vix_high_threshold": VIX_HIGH,
+            "vix_chop_threshold": VIX_CHOP,
+            "vix_chop_current": None,
+            "min_avg_volume": MIN_AVG_VOLUME,
+            "error": str(e),
+        }
+
+
 def status() -> Dict:
     from . import ml_scorer
 
@@ -756,6 +792,6 @@ def status() -> Dict:
 __all__ = [
     "init_db", "get_mode", "set_mode", "run_cycle", "run_cycle_if_enabled",
     "decide_entry", "decide_exits", "approve_proposal", "reject_proposal",
-    "get_log", "get_queue", "status",
+    "get_log", "get_queue", "status", "filters",
 ]
 

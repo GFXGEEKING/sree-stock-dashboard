@@ -646,6 +646,13 @@ async def agent_queue(status: Optional[str] = None):
     return {"queue": trading_agent.get_queue(status=status)}
 
 
+@app.get("/api/agent/filters", tags=["Agent"])
+async def agent_filters():
+    """Live status of hardening filters: VIX regime gate + liquidity minimums."""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(executor, trading_agent.filters)
+
+
 @app.post("/api/agent/approve/{item_id}", tags=["Agent"])
 async def agent_approve(item_id: int):
     loop = asyncio.get_event_loop()

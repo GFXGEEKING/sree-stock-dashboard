@@ -28,20 +28,23 @@ export default function AgentPanel() {
   const [status, setStatus] = useState(null)
   const [log, setLog] = useState([])
   const [queue, setQueue] = useState([])
+  const [filters, setFilters] = useState(null)
   const [busy, setBusy] = useState(false)
   const [cycleResult, setCycleResult] = useState(null)
   const [expanded, setExpanded] = useState({})
 
   const refresh = useCallback(async () => {
     try {
-      const [s, l, q] = await Promise.all([
+      const [s, l, q, f] = await Promise.all([
         fetch(`${API}/api/agent/status`).then((r) => r.json()),
         fetch(`${API}/api/agent/log?limit=30`).then((r) => r.json()),
         fetch(`${API}/api/agent/queue?status=PENDING`).then((r) => r.json()),
+        fetch(`${API}/api/agent/filters`).then((r) => r.json()),
       ])
       setStatus(s)
       setLog(l.log || [])
       setQueue(q.queue || [])
+      setFilters(f)
     } catch {
       /* non-fatal */
     }
@@ -220,6 +223,51 @@ export default function AgentPanel() {
           </div>
         </div>
       </section>
+
+      {/* Trading Filters panel */}
+      {filters && (
+        <section className="bg-slate-900/60 border border-slate-800 rounded-2xl p-5">
+          <div className="flex items-center gap-2 text-slate-400 text-sm mb-3">
+            <ShieldCheck className="w-4 h-4 text-emerald-300" /> Trading Filters
+          </div>
+          <div className="text-xs text-slate-400 space-y-1">
+            <div>
+              <span className={`inline-block w-2 h-2 rounded-full mr-1.5 ${
+                filters.volatility_regime_ok === true
+                  ? "bg-emerald-400"
+                  : filters.volatility_regime_ok === false
+                  ? "bg-rose-400"
+                  : "bg-slate-500"
+              }`}></span>
+              Volatility regime:
+              {filters.volatility_regime_ok === true && (
+                <span className="text-emerald-300"> Allowed</span>
+              )}
+              {filters.volatility_regime_ok === false && (
+                <span className="text-rose-300"> Blocked</span>
+              )}
+              {filters.volatility_regime_ok === null && (
+                <span className="text-slate-400"> Unknown</span>
+              )}
+              {filters.vix_level != null && (
+                <span className="text-slate-500">
+                  {" "}· VIX {filters.vix_level.toFixed(1)} (panic ≥{filters.vix_high_threshold})
+                </span>
+              )}
+            </div>
+            <div>
+              <span className={`inline-block w-2 h-2 rounded-full mr-1.5 bg-emerald-400`}></span>
+              Liquidity gate: active · min 30d avg volume {" "}
+              {filters.min_avg_volume.toLocaleString()} shares/day
+            </div>
+            {filters.vix_chop_current !== null && typeof filters.vix_chop_current !== "undefined" && (
+              <div className="text-slate-500">
+                VIX 20d stdev: {filters.vix_chop_current.toFixed(1)}% (whipsaw blocks ≥{filters.vix_chop_threshold}%)
+              </div>
+            )}
+          </div>
+        </section>
+      )}
 
 
       {/* Pending proposals (SEMI_AUTO) */}
