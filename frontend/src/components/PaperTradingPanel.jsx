@@ -264,6 +264,19 @@ export default function PaperTradingPanel() {
   const positions = portfolio?.open_positions || []
   const history = portfolio?.trade_history || []
   const pnlColor = (v) => (v > 0 ? "text-emerald-400" : v < 0 ? "text-rose-400" : "text-slate-400")
+  // Per-trade R multiple: net P&L / initial risk (|entry - stop| × shares). Long: stop below entry; short: above.
+  const rMult = (t) => {
+    const pnl = Number(t.pnl_eur)
+    const entry = Number(t.entry_price)
+    const stop = Number(t.stop_loss)
+    const shares = Number(t.shares)
+    if (!Number.isFinite(pnl) || !Number.isFinite(entry) || !Number.isFinite(stop) || !shares) return null
+    const side = String(t.side || "BUY").toUpperCase()
+    const riskPerShare = side === "SELL" || side === "SHORT" ? stop - entry : entry - stop
+    const totalRisk = riskPerShare * shares
+    if (totalRisk <= 0) return null
+    return pnl / totalRisk
+  }
 
   // Equity curve chart data
   const equityChartData = useMemo(() => {
@@ -688,6 +701,11 @@ export default function PaperTradingPanel() {
               Risk-adjusted metrics and trade statistics across all closed paper trades.
             </p>
           </div>
+          {metrics.trades?.edge_decay?.triggered && (
+            <div className="mx-5 mt-4 px-4 py-3 rounded-xl border border-amber-500/40 bg-amber-500/10 text-amber-200 text-xs">
+              ⚠️ {metrics.trades.edge_decay.message}
+            </div>
+          )}
           <div className="p-5 grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3 text-sm">
             <div className="bg-slate-800/50 border border-slate-700 rounded-lg px-3 py-2">
               <div className="text-xs text-slate-400">Sharpe</div>
@@ -762,7 +780,63 @@ export default function PaperTradingPanel() {
               <div className="text-xs text-slate-500">Open Positions</div>
               <div className="font-mono">{metrics.current?.open_positions ?? 0}</div>
             </div>
+            <div className="bg-slate-800/20 border border-slate-800 rounded-lg px-3 py-2">
+              <div className="text-xs text-slate-500">Avg R Multiple</div>
+              <div className={`font-mono ${(metrics.trades?.avg_r_multiple ?? 0) >= 0 ? "text-emerald-300" : "text-rose-300"}`}>
+                {metrics.trades?.avg_r_multiple != null ? `${metrics.trades.avg_r_multiple}R` : "—"}
+              </div>
+            </div>
+            <div className="bg-slate-800/20 border border-slate-800 rounded-lg px-3 py-2">
+              <div className="text-xs text-slate-500">vs {metrics.benchmark?.label ?? "S&P 500"}</div>
+              <div className={`font-mono ${(metrics.benchmark?.outperform_pct ?? 0) >= 0 ? "text-emerald-300" : "text-rose-300"}`}>
+                {metrics.benchmark?.outperform_pct != null ? `${metrics.benchmark.outperform_pct > 0 ? "+" : ""}${metrics.benchmark.outperform_pct}%` : "—"}
+              </div>
+            </div>
           </div>
+          {metrics.benchmark?.series?.length > 1 && (
+            <div className="px-5 pb-5">
+              <div className="text-xs text-slate-500 mb-2">
+                Account vs {metrics.benchmark.label} (% return from start · last {metrics.benchmark.window_days}d)
+              </div>
+              <div className="h-40">
+                <Line
+                  data={{
+                    labels: metrics.benchmark.series.map((s) => s.date),
+                    datasets: [
+                      {
+                        label: "Account",
+                        data: metrics.benchmark.series.map((s) => s.account_return_pct),
+                        borderColor: "rgb(56, 189, 248)",
+                        backgroundColor: "rgba(56, 189, 248, 0.10)",
+                        borderWidth: 2,
+                        pointRadius: 0,
+                        tension: 0.25,
+                        fill: true,
+                      },
+                      {
+                        label: metrics.benchmark.label,
+                        data: metrics.benchmark.series.map((s) => s.benchmark_return_pct),
+                        borderColor: "rgb(148, 163, 184)",
+                        borderWidth: 1.5,
+                        pointRadius: 0,
+                        tension: 0.25,
+                        fill: false,
+                      },
+                    ],
+                  }}
+                  options={{
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { labels: { color: "#cbd5e1", boxWidth: 12 } } },
+                    scales: {
+                      x: { grid: { color: "rgba(148,163,184,0.08)" }, ticks: { color: "#94a3b8", maxTicksLimit: 8 } },
+                      y: { grid: { color: "rgba(148,163,184,0.08)" }, ticks: { color: "#94a3b8", callback: (v) => `${v}%` } },
+                    },
+                  }}
+                />
+              </div>
+            </div>
+          )}
           {metrics.trades?.closed_trades === 0 && (
             <div className="px-5 pb-5 text-xs text-slate-500">
               No closed trades yet — metrics populate as positions are closed.
@@ -797,6 +871,7 @@ export default function PaperTradingPanel() {
                   <th className="text-right px-3 py-3">Exit</th>
                   <th className="text-right px-3 py-3">P&L (€)</th>
                   <th className="text-right px-3 py-3">P&L (%)</th>
+                  <th className="text-right px-3 py-3">R</th>
                   <th className="text-right px-3 py-3">Hold</th>
                   <th className="text-right px-5 py-3">Status</th>
                 </tr>
@@ -804,7 +879,7 @@ export default function PaperTradingPanel() {
               <tbody>
                 {history.length === 0 ? (
                   <tr>
-                    <td colSpan="9" className="text-center py-10 text-slate-500">No trades yet</td>
+                    <td colSpan="10" className="text-center py-10 text-slate-500">No trades yet</td>
                   </tr>
                 ) : (
                   history.map((t) => (
@@ -819,6 +894,9 @@ export default function PaperTradingPanel() {
                       </td>
                       <td className={`px-3 py-2 text-right font-mono ${pnlColor(t.pnl_pct)}`}>
                         {t.pnl_pct != null ? fmtPct(t.pnl_pct) : "—"}
+                      </td>
+                      <td className={`px-3 py-2 text-right font-mono ${(() => { const r = rMult(t); return r == null ? "text-slate-500" : r > 0 ? "text-emerald-400" : r < 0 ? "text-rose-400" : "text-slate-400" })()}`}>
+                        {(() => { const r = rMult(t); return r == null ? "—" : `${r > 0 ? "+" : ""}${r.toFixed(2)}R` })()}
                       </td>
                       <td className="px-3 py-2 text-right font-mono text-slate-400">{t.hold_days ?? "—"}d</td>
                       <td className="px-5 py-2 text-right">

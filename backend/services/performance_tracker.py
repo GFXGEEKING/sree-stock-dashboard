@@ -137,6 +137,65 @@ def risk_metrics() -> Dict:
     return out
 
 
+def _r_multiple(t: Dict) -> Optional[float]:
+    """Risk multiple for one closed trade (P&L / initial risk at entry).
+
+    R = net P&L / (|entry - stop| * shares). Longs: stop below entry.
+    Shorts (side == 'SELL'): stop above entry. Returns None when the info
+    needed to define initial risk is missing (e.g. no stop set).
+    """
+    pnl = t.get("pnl_eur")
+    entry = t.get("entry_price")
+    stop = t.get("stop_loss")
+    shares = t.get("shares")
+    if pnl is None or not entry or not stop or not shares or shares <= 0:
+        return None  # no stop = no well-defined initial risk
+    side = str(t.get("side", "BUY")).upper()
+    if side == "SELL" or side == "SHORT":
+        risk_per_share = (stop or 0) - float(entry)
+    else:
+        risk_per_share = float(entry) - (stop or 0)
+    total_risk = risk_per_share * float(shares)
+    if total_risk <= 0:
+        return None
+    return float(pnl) / total_risk
+
+
+def edge_decay(trades: List[Dict], recent_n: int = 20) -> Dict:
+    """Compare the most recent N closed trades against the lifetime average.
+
+    Flags a warning when the recent win-rate trails the lifetime win-rate by a
+    meaningful margin AND there are enough recent trades to be meaningful.
+    """
+    closed = [t for t in trades if t.get("status") == "CLOSED" and t.get("pnl_eur") is not None]
+    closed_sorted = sorted(closed, key=lambda x: (x.get("exit_date") or "", x.get("id") or 0))
+    recent = closed_sorted[-recent_n:]
+    if not closed:
+        return {"triggered": False, "n_recent": 0, "recent_win_rate_pct": 0.0,
+                "lifetime_win_rate_pct": 0.0, "message": "No closed trades yet."}
+
+    def _wr(tlist):
+        if not tlist:
+            return 0.0
+        wins = sum(1 for t in tlist if (t.get("pnl_eur") or 0) > 0)
+        return round(wins / len(tlist) * 100.0, 1)
+
+    lifetime_wr = _wr(closed)
+    recent_wr = _wr(recent)
+    n_recent = len(recent)
+    drop = lifetime_wr - recent_wr
+    triggered = n_recent >= 10 and drop >= 15.0
+    message = (
+        f"Recent {n_recent} trades win-rate {recent_wr}% trails lifetime "
+        f"{lifetime_wr}% by {drop:.0f} pts — edge may be decaying."
+        if triggered else
+        f"Recent {n_recent} trade win-rate {recent_wr}% vs lifetime {lifetime_wr}% — stable."
+    )
+    return {"triggered": triggered, "n_recent": n_recent,
+            "recent_win_rate_pct": recent_wr, "lifetime_win_rate_pct": lifetime_wr,
+            "message": message}
+
+
 def trade_metrics(trades: List[Dict]) -> Dict:
     """Expectancy / profit factor / win-rate from closed trade rows."""
     closed = [t for t in trades if t.get("status") == "CLOSED" and t.get("pnl_eur") is not None]
@@ -145,6 +204,7 @@ def trade_metrics(trades: List[Dict]) -> Dict:
             "closed_trades": 0, "win_rate_pct": 0.0, "expectancy_eur": 0.0,
             "profit_factor": None, "avg_win_eur": 0.0, "avg_loss_eur": 0.0,
             "avg_hold_days": 0.0, "best_eur": 0.0, "worst_eur": 0.0,
+            "avg_r_multiple": None, "edge_decay": edge_decay(closed),
         }
     wins = [t for t in closed if (t.get("pnl_eur") or 0) > 0]
     losses = [t for t in closed if (t.get("pnl_eur") or 0) <= 0]
@@ -155,7 +215,13 @@ def trade_metrics(trades: List[Dict]) -> Dict:
     avg_win = gross_win / len(wins) if wins else 0.0
     avg_loss = -gross_loss / len(losses) if losses else 0.0
     expectancy = win_rate * avg_win + (1 - win_rate) * avg_loss
-    return {
+
+    # Risk multiples (only where initial risk is well-defined by a stop)
+    r_vals = [_r_multiple(t) for t in closed]
+    r_vals = [r for r in r_vals if r is not None]
+    avg_r = round(sum(r_vals) / len(r_vals), 2) if r_vals else None
+
+    out = {
         "closed_trades": n,
         "win_rate_pct": round(win_rate * 100.0, 1),
         "expectancy_eur": round(expectancy, 2),
@@ -165,6 +231,90 @@ def trade_metrics(trades: List[Dict]) -> Dict:
         "avg_hold_days": round(sum((t.get("hold_days") or 0) for t in closed) / n, 1),
         "best_eur": round(max((t["pnl_eur"] or 0) for t in closed), 2),
         "worst_eur": round(min((t["pnl_eur"] or 0) for t in closed), 2),
+        "avg_r_multiple": avg_r,
+        "edge_decay": edge_decay(closed),
+    }
+    return out
+
+
+def _benchmark_overlay(limit: int = 30) -> Dict:
+    """Account-vs-S&P-500 daily return overlay built from the performance log.
+
+    Normalizes the account portfolio value and the ^GSPC close to % change from
+    the account's first logged day. Fails soft (returns empty series) if the
+    log or the benchmark feed is unavailable so the UI degrades gracefully.
+    """
+    from . import benchmark as bm
+    rows = get_performance_history()
+    rows = sorted(rows, key=lambda r: r.get("date") or "")
+    if len(rows) < 2:
+        return {"label": "S&P 500", "account_return_pct": None,
+                "benchmark_return_pct": None, "outperform_pct": None,
+                "window_days": 0, "series": [], "available": False}
+    start_date = rows[0]["date"]
+    end_date = rows[-1]["date"]
+    acc = [(r["date"], r["portfolio_value"]) for r in rows]
+
+    bench_series = bm.fetch_benchmark("US", period="1y")
+    if bench_series is None or bench_series.empty:
+        return {"label": "S&P 500", "account_return_pct": None,
+                "benchmark_return_pct": None, "outperform_pct": None,
+                "window_days": 0, "series": [], "available": False}
+
+    bm_dates = [d.strftime("%Y-%m-%d") for d in bench_series.index]
+    bm_vals = list(bench_series.values)
+    bm_map = dict(zip(bm_dates, bm_vals))
+    bm_acc = [(bm_dates[i], v) for i, v in enumerate(bm_vals)
+              if start_date <= bm_dates[i] <= end_date]
+    if not bm_acc:
+        return {"label": "S&P 500", "account_return_pct": None,
+                "benchmark_return_pct": None, "outperform_pct": None,
+                "window_days": 0, "series": [], "available": False}
+    # Rebase both to % return from start of the overlay window
+    acc_start = acc[0][1]
+    bm_start = bm_acc[0][1]
+    if not acc_start or bm_start <= 0:
+        return {"label": "S&P 500", "account_return_pct": None,
+                "benchmark_return_pct": None, "outperform_pct": None,
+                "window_days": 0, "series": [], "available": False}
+
+    # Merge account rows onto benchmark dates; interpolate account values.
+    # Build a daily series of {date, account_return_pct, benchmark_return_pct}
+    acc_by_date = dict(acc)
+    bm_only_dates = sorted({d for d, _ in bm_acc})
+    series = []
+    # account has fewer rows than daily benchmark; sample up to `limit` points
+    step = max(1, len(bm_only_dates) // limit)
+    for d in bm_only_dates[::step]:
+        bv = bm_map[d]
+        av = acc_by_date.get(d)
+        # fill account value gap with the most recent known value
+        if av is None:
+            for rd, rv in acc:
+                if rd <= d:
+                    av = rv
+                else:
+                    break
+        if av is None:
+            continue
+        series.append({
+            "date": d,
+            "account_return_pct": round((av / acc_start - 1.0) * 100.0, 2),
+            "benchmark_return_pct": round((bv / bm_start - 1.0) * 100.0, 2),
+        })
+
+    account_return = round((acc[-1][1] / acc_start - 1.0) * 100.0, 2)
+    bm_end = bm_acc[-1][1]
+    benchmark_return = round((bm_end / bm_start - 1.0) * 100.0, 2)
+    return {
+        "label": "S&P 500",
+        "account_return_pct": account_return,
+        "benchmark_return_pct": benchmark_return,
+        "outperform_pct": round(account_return - benchmark_return, 2),
+        "window_days": (datetime.strptime(end_date, "%Y-%m-%d")
+                        - datetime.strptime(start_date, "%Y-%m-%d")).days,
+        "series": series,
+        "available": True,
     }
 
 
@@ -178,6 +328,7 @@ def portfolio_metrics() -> Dict:
         "daily_log": hist[-30:],
         "risk": risk_metrics(),
         "trades": trade_metrics(port.get("trade_history", [])),
+        "benchmark": _benchmark_overlay(),
         "current": {
             "equity": port["stats"]["equity"],
             "total_return_pct": port["stats"]["total_return_pct"],
