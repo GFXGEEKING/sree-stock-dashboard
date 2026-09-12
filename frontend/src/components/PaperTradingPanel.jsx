@@ -53,6 +53,7 @@ export default function PaperTradingPanel() {
   const [topStocks, setTopStocks] = useState([])
   const [topLoading, setTopLoading] = useState(true)
   const [regionFilter, setRegionFilter] = useState("All")
+  const [search, setSearch] = useState("")
 
   // New order form state
   const [form, setForm] = useState({
@@ -170,18 +171,22 @@ export default function PaperTradingPanel() {
   }
 
   // Ask the backend for a risk-based share-count suggestion
-  const suggestSize = async () => {
-    if (!form.symbol || !form.price || !form.stop_loss) {
+  const suggestSize = async (override = {}) => {
+    const symbol = override.symbol ?? form.symbol
+    const price = override.price ?? form.price
+    const stop_loss = override.stop_loss ?? form.stop_loss
+    if (!symbol || !price || !stop_loss) {
       showToast("Fill symbol, price and stop-loss first", false)
       return
     }
     try {
       const body = {
-        symbol: form.symbol.trim().toUpperCase(),
-        price: parseFloat(form.price),
-        stop_loss: parseFloat(form.stop_loss),
+        symbol: symbol.trim().toUpperCase(),
+        price: parseFloat(price),
+        stop_loss: parseFloat(stop_loss),
       }
-      if (form.target_price) body.target_price = parseFloat(form.target_price)
+      const target = override.target_price ?? form.target_price
+      if (target) body.target_price = parseFloat(target)
       const res = await fetch(`${API}/api/paper/suggest-size`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -199,6 +204,26 @@ export default function PaperTradingPanel() {
     } catch (e) {
       showToast(e.message, false)
     }
+  }
+
+  // ⚡ Quick: prefill the order form AND auto-size it in one click
+  const quickTrade = (s) => {
+    const price = s.current_price || s.price
+    if (!price) {
+      showToast("No live price available for this ticker", false)
+      return
+    }
+    const stop = String((price * 0.94).toFixed(2))
+    const target = String((price * 1.15).toFixed(2))
+    setForm({
+      symbol: s.ticker,
+      shares: 1,
+      price: String(price),
+      stop_loss: stop,
+      target_price: target,
+    })
+    suggestSize({ symbol: s.ticker, price: String(price), stop_loss: stop, target_price: target })
+    showToast(`${s.ticker} prefilled + auto-sized — review and submit`, true)
   }
 
   const submitOrder = async (e) => {
@@ -526,10 +551,16 @@ export default function PaperTradingPanel() {
           <div>
             <h2 className="text-lg font-semibold">Top 25 Scanner Stocks</h2>
             <p className="text-xs text-slate-400 mt-0.5">
-              Ranked by composite score. Click a row to prefill the order form above (stop -6% / target +15%).
+              Showing {topStocks.length} recommendations, ranked best → weakest by composite score. Each row shows a quality grade and a brief reason for the pick.
             </p>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search symbol…"
+              className="px-3 py-1.5 bg-slate-800/60 border border-slate-700 rounded-lg text-xs w-36 focus:outline-none focus:border-sky-500"
+            />
             {["All", "Germany", "Europe", "USA"].map((r) => (
               <button
                 key={r}
@@ -544,6 +575,16 @@ export default function PaperTradingPanel() {
               </button>
             ))}
           </div>
+        </div>
+        {/* Grade legend + why hint */}
+        <div className="px-5 py-2.5 border-b border-slate-800/70 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+          <span>Grade:</span>
+          {["STRONG", "GOOD", "FAIR", "WEAK", "POOR"].map((g) => (
+            <span key={g} className={`px-2 py-0.5 rounded border font-bold text-[10px] ${gradeColor(g)}`}>
+              {g}
+            </span>
+          ))}
+          <span className="ml-2 text-slate-500">💡 = why this pick</span>
         </div>
         <div className="overflow-x-auto max-h-96">
           <table className="w-full text-sm">
@@ -575,7 +616,14 @@ export default function PaperTradingPanel() {
                   </td>
                 </tr>
               ) : (
-                topStocks.map((s, i) => {
+                topStocks
+                  .filter(
+                    (s) =>
+                      !search ||
+                      s.ticker.toLowerCase().includes(search.toLowerCase()) ||
+                      (s.name || "").toLowerCase().includes(search.toLowerCase())
+                  )
+                  .map((s, i) => {
                   const change = s.daily_change
                   return (
                     <tr
@@ -624,11 +672,11 @@ export default function PaperTradingPanel() {
                         <button
                           onClick={(e) => {
                             e.stopPropagation()
-                            prefillOrder(s)
+                            quickTrade(s)
                           }}
                           className="px-2.5 py-1 bg-emerald-500/15 border border-emerald-500/40 text-emerald-200 rounded text-xs hover:bg-emerald-500/25"
                         >
-                          <Play className="w-3 h-3 inline mr-1" />Fill
+                          <Play className="w-3 h-3 inline mr-1" />Quick
                         </button>
                       </td>
                     </tr>
