@@ -23,6 +23,7 @@ from .services import performance_tracker as perf
 from .services import scan_history
 from .services import ml_scorer
 from .services import news_sentiment
+from .services import pick_grader
 from .services import correlation_filter as corr_filter
 from .services import event_filter
 from .services import agent as trading_agent
@@ -197,6 +198,7 @@ async def dashboard(region: Optional[str] = None, limit: int = 25):
                     "current_price": price_data.get("price") if price_data else None,
                     "daily_change": price_data.get("daily_change_pct") if price_data else None,
                     "forecast": fc,
+                    **pick_grader.grade_pick({**entry, "forecast": fc}),
                 })
             except Exception as e:
                 logger.error(f"Error processing ticker {t}: {e}")
@@ -205,6 +207,7 @@ async def dashboard(region: Optional[str] = None, limit: int = 25):
                     "current_price": None,
                     "daily_change": None,
                     "forecast": None,
+                    **pick_grader.grade_pick(entry),
                     "error": str(e),
                 })
 

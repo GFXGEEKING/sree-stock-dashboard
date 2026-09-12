@@ -264,6 +264,15 @@ export default function PaperTradingPanel() {
   const positions = portfolio?.open_positions || []
   const history = portfolio?.trade_history || []
   const pnlColor = (v) => (v > 0 ? "text-emerald-400" : v < 0 ? "text-rose-400" : "text-slate-400")
+  // Grade badge color per pick grade
+  const gradeColor = (g) => ({
+    STRONG: "bg-emerald-500/15 text-emerald-300 border-emerald-500/40",
+    GOOD: "bg-sky-500/15 text-sky-300 border-sky-500/40",
+    FAIR: "bg-amber-500/15 text-amber-300 border-amber-500/40",
+    WEAK: "bg-orange-500/15 text-orange-300 border-orange-500/40",
+    POOR: "bg-rose-500/15 text-rose-300 border-rose-500/40",
+  }[g] || "bg-slate-800 text-slate-300 border-slate-600/40")
+
   // Per-trade R multiple: net P&L / initial risk (|entry - stop| × shares). Long: stop below entry; short: above.
   const rMult = (t) => {
     const pnl = Number(t.pnl_eur)
@@ -547,20 +556,21 @@ export default function PaperTradingPanel() {
                 <th className="text-right px-3 py-3">Price</th>
                 <th className="text-right px-3 py-3">Day %</th>
                 <th className="text-right px-3 py-3">Score</th>
+                <th className="text-center px-3 py-3">Grade</th>
                 <th className="text-center px-5 py-3">Trade</th>
               </tr>
             </thead>
             <tbody>
               {topLoading && topStocks.length === 0 ? (
                 <tr>
-                  <td colSpan="8" className="text-center py-10 text-slate-400">
+                  <td colSpan="9" className="text-center py-10 text-slate-400">
                     <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2" />
                     Loading scanner rankings…
                   </td>
                 </tr>
               ) : topStocks.length === 0 ? (
                 <tr>
-                  <td colSpan="8" className="text-center py-10 text-slate-500">
+                  <td colSpan="9" className="text-center py-10 text-slate-500">
                     No scanner data available — try Refresh or another region.
                   </td>
                 </tr>
@@ -584,7 +594,14 @@ export default function PaperTradingPanel() {
                           {i + 1}
                         </span>
                       </td>
-                      <td className="px-3 py-2 font-mono font-semibold">{s.ticker}</td>
+                      <td className="px-3 py-2">
+                        <div className="font-mono font-semibold">{s.ticker}</div>
+                        {s.summary && (
+                          <div className="text-[10px] text-slate-500 mt-0.5 max-w-56 truncate" title={`💡 ${s.summary}`}>
+                            💡 {s.summary}
+                          </div>
+                        )}
+                      </td>
                       <td className="px-3 py-2 text-slate-200">{s.name || "—"}</td>
                       <td className="px-3 py-2 text-slate-400 text-xs">{s.region}</td>
                       <td className="px-3 py-2 text-right font-mono">{fmtEur0(s.current_price)}</td>
@@ -597,6 +614,11 @@ export default function PaperTradingPanel() {
                       </td>
                       <td className="px-3 py-2 text-right font-mono text-sky-300">
                         {s.composite_score != null ? Number(s.composite_score).toFixed(3) : "—"}
+                      </td>
+                      <td className="px-3 py-2 text-center">
+                        <span className={`px-1.5 py-0.5 rounded border text-[10px] font-bold ${gradeColor(s.grade)}`}>
+                          {s.grade || "—"}
+                        </span>
                       </td>
                       <td className="px-5 py-2 text-center">
                         <button
