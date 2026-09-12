@@ -789,9 +789,42 @@ def status() -> Dict:
     }
 
 
+def recent_trades(limit: int = 20) -> Dict:
+    """Recent closed trades with P&L summary (agent-sourced only)."""
+    try:
+        from . import paper_trade as pt
+        history = pt.get_trade_history(limit=200)
+        # Only agent-sourced trades
+        agent_trades = [
+            t for t in history
+            if t.get("status") == "CLOSED" and t.get("source") == "agent"
+        ][:limit]
+        # Compute summary stats
+        closed = agent_trades
+        wins = [t for t in closed if (t.get("pnl_eur") or 0) > 0]
+        losses = [t for t in closed if (t.get("pnl_eur") or 0) <= 0]
+        total_pnl = sum(t.get("pnl_eur") or 0 for t in closed)
+        avg_hold = sum(t.get("hold_days") or 0 for t in closed) / len(closed) if closed else 0
+        win_rate = (len(wins) / len(closed) * 100) if closed else 0
+        return {
+            "trades": agent_trades,
+            "stats": {
+                "count": len(closed),
+                "win_rate_pct": round(win_rate, 1),
+                "total_pnl_eur": round(total_pnl, 2),
+                "avg_hold_days": round(avg_hold, 1),
+                "wins": len(wins),
+                "losses": len(losses),
+            }
+        }
+    except Exception as e:
+        logger.debug(f"recent_trades failed: {e}")
+        return {"trades": [], "stats": {"count": 0, "win_rate_pct": 0, "total_pnl_eur": 0, "avg_hold_days": 0, "wins": 0, "losses": 0}}
+
+
 __all__ = [
     "init_db", "get_mode", "set_mode", "run_cycle", "run_cycle_if_enabled",
     "decide_entry", "decide_exits", "approve_proposal", "reject_proposal",
-    "get_log", "get_queue", "status", "filters",
+    "get_log", "get_queue", "status", "filters", "recent_trades",
 ]
 

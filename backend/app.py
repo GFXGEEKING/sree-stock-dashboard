@@ -653,6 +653,13 @@ async def agent_filters():
     return await loop.run_in_executor(executor, trading_agent.filters)
 
 
+@app.get("/api/agent/trades", tags=["Agent"])
+async def agent_trades(limit: int = 20):
+    """Recent agent-sourced closed trades with P&L summary."""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(executor, lambda: trading_agent.recent_trades(limit=limit))
+
+
 @app.post("/api/agent/approve/{item_id}", tags=["Agent"])
 async def agent_approve(item_id: int):
     loop = asyncio.get_event_loop()
