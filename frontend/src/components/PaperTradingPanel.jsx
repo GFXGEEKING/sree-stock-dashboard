@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react"
+import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import {
   Wallet,
   Play,
@@ -54,6 +54,8 @@ export default function PaperTradingPanel() {
   const [topLoading, setTopLoading] = useState(true)
   const [regionFilter, setRegionFilter] = useState("All")
   const [search, setSearch] = useState("")
+  const [selectedTicker, setSelectedTicker] = useState(null)
+  const formRef = useRef(null)
 
   // New order form state
   const [form, setForm] = useState({
@@ -177,6 +179,7 @@ export default function PaperTradingPanel() {
       showToast("No live price available for this ticker", false)
       return
     }
+    setSelectedTicker(s.ticker)
     setForm({
       symbol: s.ticker,
       shares: 1,
@@ -186,6 +189,7 @@ export default function PaperTradingPanel() {
       target_price: String((price * 1.15).toFixed(2)),
     })
     showToast(`Prefilled order for ${s.ticker} — check size and submit`, true)
+    formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
   }
 
   // Ask the backend for a risk-based share-count suggestion
@@ -233,6 +237,7 @@ export default function PaperTradingPanel() {
     }
     const stop = String((price * 0.94).toFixed(2))
     const target = String((price * 1.15).toFixed(2))
+    setSelectedTicker(s.ticker)
     setForm({
       symbol: s.ticker,
       shares: 1,
@@ -242,6 +247,7 @@ export default function PaperTradingPanel() {
     })
     suggestSize({ symbol: s.ticker, price: String(price), stop_loss: stop, target_price: target })
     showToast(`${s.ticker} prefilled + auto-sized — review and submit`, true)
+    formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
   }
 
   const submitOrder = async (e) => {
@@ -422,7 +428,7 @@ export default function PaperTradingPanel() {
       </section>
 
       {/* ===== New order form ===== */}
-      <section className="bg-slate-900/60 border border-slate-800 rounded-2xl">
+      <section ref={formRef} className="bg-slate-900/60 border border-slate-800 rounded-2xl scroll-mt-24">
         <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between">
           <div>
             <h2 className="text-lg font-semibold flex items-center gap-2">
@@ -617,9 +623,9 @@ export default function PaperTradingPanel() {
           ))}
           <span className="ml-2 text-slate-500">💡 = why this pick</span>
         </div>
-        <div className="overflow-x-auto max-h-96">
+        <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-slate-900/80 text-slate-400 uppercase text-xs tracking-wider sticky top-0">
+            <thead className="bg-slate-900/80 text-slate-400 uppercase text-xs tracking-wider">
               <tr>
                 <th className="text-left px-5 py-3">#</th>
                 <th className="text-left px-3 py-3">Recommendation</th>
@@ -656,7 +662,11 @@ export default function PaperTradingPanel() {
                     <tr
                       key={s.ticker}
                       onClick={() => prefillOrder(s)}
-                      className="border-t border-slate-800/70 cursor-pointer hover:bg-slate-800/40"
+                      className={`border-t border-slate-800/70 cursor-pointer hover:bg-slate-800/40 ${
+                        selectedTicker === s.ticker
+                          ? "bg-sky-500/10 outline outline-1 outline-sky-500/40"
+                          : ""
+                      }`}
                     >
                       <td className="px-5 py-2">
                         <span
