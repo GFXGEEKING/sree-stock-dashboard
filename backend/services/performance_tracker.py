@@ -348,7 +348,26 @@ def portfolio_metrics() -> Dict:
     """Combine the daily log metrics with trade-level metrics + live snapshot."""
     from . import paper_trade as pt  # lazy to avoid import cycles
 
-    port = pt.get_portfolio()
+    # Mirror /api/paper/portfolio: enrich open positions with latest cached
+    # prices so unrealized stats reflect reality (cache-first, per-symbol
+    # fallback — never scans the whole universe).
+    prices: Dict[str, float] = {}
+    try:
+        from . import data_fetcher as df_mod
+        for p in pt.get_open_positions():
+            sym = p.get("symbol")
+            if not sym or sym in prices:
+                continue
+            try:
+                frame = df_mod.fetch_single(sym)
+                if frame is not None and not frame.empty:
+                    prices[sym] = float(frame["Close"].iloc[-1])
+            except Exception as e:
+                logger.debug(f"price lookup failed for {sym}: {e}")
+    except Exception as e:
+        logger.debug(f"open-position price enrichment skipped: {e}")
+
+    port = pt.get_portfolio(current_prices=prices)
     hist = get_performance_history()
     return {
         "daily_log": hist[-30:],
