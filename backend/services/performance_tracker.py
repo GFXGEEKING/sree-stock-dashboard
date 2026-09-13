@@ -318,6 +318,32 @@ def _benchmark_overlay(limit: int = 30) -> Dict:
     }
 
 
+def open_position_metrics(open_positions: List[Dict]) -> Dict:
+    """Aggregate unrealized stats across OPEN positions (pure function).
+
+    Measures floating P&L and spread of the currently held picks so the
+    performance summary covers open as well as closed trades.
+    """
+    op = open_positions or []
+    upnl = [float(p.get("unrealized_pnl") or 0.0) for p in op]
+    upct = [float(p["unrealized_pnl_pct"]) for p in op
+            if p.get("unrealized_pnl_pct") is not None]
+    exposure = sum(
+        float(p.get("current_price") or p.get("entry_price") or 0) * float(p.get("shares") or 0)
+        for p in op
+    )
+    winners = sum(1 for v in upnl if v > 0)
+    return {
+        "open_positions": len(op),
+        "unrealized_pnl": round(sum(upnl), 2),
+        "avg_move_pct": round(sum(upct) / len(upct), 2) if upct else None,
+        "best_pct": round(max(upct), 2) if upct else None,
+        "worst_pct": round(min(upct), 2) if upct else None,
+        "open_winners": winners,
+        "exposure_eur": round(exposure, 2),
+    }
+
+
 def portfolio_metrics() -> Dict:
     """Combine the daily log metrics with trade-level metrics + live snapshot."""
     from . import paper_trade as pt  # lazy to avoid import cycles
@@ -328,6 +354,7 @@ def portfolio_metrics() -> Dict:
         "daily_log": hist[-30:],
         "risk": risk_metrics(),
         "trades": trade_metrics(port.get("trade_history", [])),
+        "open": open_position_metrics(port.get("open_positions", [])),
         "benchmark": _benchmark_overlay(),
         "current": {
             "equity": port["stats"]["equity"],

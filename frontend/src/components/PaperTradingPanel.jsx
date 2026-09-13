@@ -877,9 +877,41 @@ export default function PaperTradingPanel() {
               <LineChart className="w-4 h-4 text-emerald-400" /> Performance Summary
             </h2>
             <p className="text-xs text-slate-400 mt-0.5">
-              Risk-adjusted metrics and trade statistics across all closed paper trades.
+              Risk-adjusted metrics and trade statistics across all closed and open paper trades.
             </p>
           </div>
+          {metrics.open && metrics.open.open_positions > 0 && (
+            <div className="px-5 pt-4 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 text-sm">
+              <div className="bg-sky-500/10 border border-sky-500/30 rounded-lg px-3 py-2">
+                <div className="text-xs text-sky-200/70">Open Positions (floating)</div>
+                <div className="font-bold text-sky-200">{metrics.open.open_positions}</div>
+              </div>
+              <div className="bg-slate-800/20 border border-slate-800 rounded-lg px-3 py-2">
+                <div className="text-xs text-slate-500">Unrealized P&L</div>
+                <div className={`font-mono font-bold ${(metrics.open.unrealized_pnl || 0) >= 0 ? "text-emerald-300" : "text-rose-300"}`}>
+                  €{(metrics.open.unrealized_pnl || 0).toFixed(2)}
+                </div>
+              </div>
+              <div className="bg-slate-800/20 border border-slate-800 rounded-lg px-3 py-2">
+                <div className="text-xs text-slate-500">Avg Open Move</div>
+                <div className={`font-mono font-bold ${(metrics.open.avg_move_pct || 0) >= 0 ? "text-emerald-300" : "text-rose-300"}`}>
+                  {metrics.open.avg_move_pct != null ? `${metrics.open.avg_move_pct > 0 ? "+" : ""}${metrics.open.avg_move_pct}%` : "—"}
+                </div>
+              </div>
+              <div className="bg-slate-800/20 border border-slate-800 rounded-lg px-3 py-2">
+                <div className="text-xs text-slate-500">Best Open</div>
+                <div className="font-mono text-emerald-300">{metrics.open.best_pct != null ? `+${metrics.open.best_pct}%` : "—"}</div>
+              </div>
+              <div className="bg-slate-800/20 border border-slate-800 rounded-lg px-3 py-2">
+                <div className="text-xs text-slate-500">Worst Open</div>
+                <div className="font-mono text-rose-300">{metrics.open.worst_pct != null ? `${metrics.open.worst_pct}%` : "—"}</div>
+              </div>
+              <div className="bg-slate-800/20 border border-slate-800 rounded-lg px-3 py-2">
+                <div className="text-xs text-slate-500">Exposure</div>
+                <div className="font-mono">€{(metrics.open.exposure_eur || 0).toFixed(2)} · {metrics.open.open_winners}/{metrics.open.open_positions} green</div>
+              </div>
+            </div>
+          )}
           {metrics.trades?.edge_decay?.triggered && (
             <div className="mx-5 mt-4 px-4 py-3 rounded-xl border border-amber-500/40 bg-amber-500/10 text-amber-200 text-xs">
               ⚠️ {metrics.trades.edge_decay.message}
