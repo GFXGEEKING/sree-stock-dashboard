@@ -23,7 +23,7 @@ import logging
 import os
 import sqlite3
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -822,9 +822,58 @@ def recent_trades(limit: int = 20) -> Dict:
         return {"trades": [], "stats": {"count": 0, "win_rate_pct": 0, "total_pnl_eur": 0, "avg_hold_days": 0, "wins": 0, "losses": 0}}
 
 
+def _split_agent_rows(history: List[Dict]) -> Tuple[List[Dict], List[Dict]]:
+    """Split trade-history rows into (closed_agent, open_agent) lists.
+
+    Pure function — agent trades are identified by source == 'agent'.
+    """
+    rows = [t for t in (history or []) if t.get("source") == "agent"]
+    closed = [t for t in rows if t.get("status") == "CLOSED"]
+    open_rows = [t for t in rows if t.get("status") == "OPEN"]
+    return closed, open_rows
+
+
+def performance() -> Dict:
+    """Performance summary across the agent's closed AND open trades.
+
+    Closed: win rate / expectancy / profit factor / avg R / edge decay.
+    Open: floating P&L and spread of currently held agent positions.
+    """
+    from . import paper_trade as pt
+    from . import performance_tracker as perf
+
+    history = pt.get_trade_history(limit=200)
+    closed, _ = _split_agent_rows(history)
+
+    # Open agent positions enriched with cached live prices
+    prices: Dict[str, float] = {}
+    try:
+        from . import data_fetcher as df_mod
+        for p in pt.get_open_positions():
+            sym = p.get("symbol")
+            if sym and sym not in prices:
+                try:
+                    frame = df_mod.fetch_single(sym)
+                    if frame is not None and not frame.empty:
+                        prices[sym] = float(frame["Close"].iloc[-1])
+                except Exception as e:
+                    logger.debug(f"price lookup failed for {sym}: {e}")
+    except Exception as e:
+        logger.debug(f"agent performance price enrichment skipped: {e}")
+
+    _, open_rows = _split_agent_rows(pt.get_open_positions(current_prices=prices))
+
+    closed_stats = perf.trade_metrics(closed)
+    total_pnl = round(sum((t.get("pnl_eur") or 0) for t in closed), 2)
+    return {
+        "closed": {**closed_stats, "total_pnl_eur": total_pnl},
+        "open": perf.open_position_metrics(open_rows),
+    }
+
+
 __all__ = [
     "init_db", "get_mode", "set_mode", "run_cycle", "run_cycle_if_enabled",
     "decide_entry", "decide_exits", "approve_proposal", "reject_proposal",
-    "get_log", "get_queue", "status", "filters", "recent_trades",
+    "get_log", "get_queue", "status", "filters", "recent_trades", "performance",
 ]
 

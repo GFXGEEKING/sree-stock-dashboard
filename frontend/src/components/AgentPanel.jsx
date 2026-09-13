@@ -31,24 +31,27 @@ export default function AgentPanel() {
   const [queue, setQueue] = useState([])
       const [filters, setFilters] = useState(null)
   const [trades, setTrades] = useState(null)
+  const [perf, setPerf] = useState(null)
   const [busy, setBusy] = useState(false)
   const [cycleResult, setCycleResult] = useState(null)
   const [expanded, setExpanded] = useState({})
 
   const refresh = useCallback(async () => {
     try {
-            const [s, l, q, f, t] = await Promise.all([
+            const [s, l, q, f, t, p] = await Promise.all([
         fetch(`${API}/api/agent/status`).then((r) => r.json()),
         fetch(`${API}/api/agent/log?limit=30`).then((r) => r.json()),
         fetch(`${API}/api/agent/queue?status=PENDING`).then((r) => r.json()),
         fetch(`${API}/api/agent/filters`).then((r) => r.json()),
         fetch(`${API}/api/agent/trades`).then((r) => r.json()),
+        fetch(`${API}/api/agent/performance`).then((r) => r.json()),
       ])
       setStatus(s)
       setLog(l.log || [])
       setQueue(q.queue || [])
       setFilters(f)
       setTrades(t)
+      setPerf(p)
     } catch {
       /* non-fatal */
     }
@@ -270,6 +273,108 @@ export default function AgentPanel() {
               </div>
             )}
           </div>
+        </section>
+      )}
+
+      {perf && (
+        <section className="bg-slate-900/60 border border-slate-800 rounded-2xl p-5">
+          <div className="flex items-center gap-2 text-slate-400 text-sm mb-3">
+            <TrendingUp className="w-4 h-4 text-violet-300" /> Agent Performance Summary
+          </div>
+          <p className="text-xs text-slate-500 mb-3">
+            Risk-adjusted metrics and trade statistics across all closed and open agent trades.
+          </p>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+            <div className="bg-slate-800/50 border border-slate-700 rounded-lg px-3 py-2">
+              <div className="text-xs text-slate-400">Closed Trades</div>
+              <div className="font-bold">{perf.closed?.closed_trades ?? 0}</div>
+            </div>
+            <div className="bg-slate-800/50 border border-slate-700 rounded-lg px-3 py-2">
+              <div className="text-xs text-slate-400">Total P&L (closed)</div>
+              <div className={`font-mono font-bold ${(perf.closed?.total_pnl_eur || 0) >= 0 ? "text-emerald-300" : "text-rose-300"}`}>
+                €{(perf.closed?.total_pnl_eur || 0).toFixed(2)}
+              </div>
+            </div>
+            <div className="bg-slate-800/50 border border-slate-700 rounded-lg px-3 py-2">
+              <div className="text-xs text-slate-400">Win Rate</div>
+              <div className={`font-bold ${(perf.closed?.win_rate_pct ?? 0) >= 50 ? "text-emerald-300" : "text-rose-300"}`}>
+                {perf.closed?.win_rate_pct ?? 0}%
+              </div>
+            </div>
+            <div className="bg-slate-800/50 border border-slate-700 rounded-lg px-3 py-2">
+              <div className="text-xs text-slate-400">Expectancy / trade</div>
+              <div className={`font-mono font-bold ${(perf.closed?.expectancy_eur || 0) >= 0 ? "text-emerald-300" : "text-rose-300"}`}>
+                €{(perf.closed?.expectancy_eur || 0).toFixed(2)}
+              </div>
+            </div>
+            <div className="bg-slate-800/20 border border-slate-800 rounded-lg px-3 py-2">
+              <div className="text-xs text-slate-500">Profit Factor</div>
+              <div className={`font-mono ${(perf.closed?.profit_factor ?? 0) >= 1 ? "text-emerald-300" : "text-rose-300"}`}>
+                {perf.closed?.profit_factor ?? "—"}
+              </div>
+            </div>
+            <div className="bg-slate-800/20 border border-slate-800 rounded-lg px-3 py-2">
+              <div className="text-xs text-slate-500">Avg R Multiple</div>
+              <div className={`font-mono ${(perf.closed?.avg_r_multiple ?? 0) >= 0 ? "text-emerald-300" : "text-rose-300"}`}>
+                {perf.closed?.avg_r_multiple != null ? `${perf.closed.avg_r_multiple}R` : "—"}
+              </div>
+            </div>
+            <div className="bg-slate-800/20 border border-slate-800 rounded-lg px-3 py-2">
+              <div className="text-xs text-slate-500">Avg Hold</div>
+              <div className="font-mono">{perf.closed?.avg_hold_days != null ? `${perf.closed.avg_hold_days}d` : "—"}</div>
+            </div>
+            <div className="bg-slate-800/20 border border-slate-800 rounded-lg px-3 py-2">
+              <div className="text-xs text-slate-500">Best / Worst</div>
+              <div className="font-mono text-xs">
+                <span className="text-emerald-300">+{(perf.closed?.best_eur ?? 0).toFixed(2)}</span>
+                {" / "}
+                <span className="text-rose-300">{(perf.closed?.worst_eur ?? 0).toFixed(2)}</span>
+              </div>
+            </div>
+          </div>
+
+          {perf.open && perf.open.open_positions > 0 && (
+            <div className="mt-3 pt-3 border-t border-slate-800 grid grid-cols-2 md:grid-cols-5 gap-3 text-sm">
+              <div className="bg-sky-500/10 border border-sky-500/30 rounded-lg px-3 py-2">
+                <div className="text-xs text-sky-200/70">Open Agent Positions</div>
+                <div className="font-bold text-sky-200">{perf.open.open_positions}</div>
+              </div>
+              <div className="bg-slate-800/20 border border-slate-800 rounded-lg px-3 py-2">
+                <div className="text-xs text-slate-500">Floating P&L</div>
+                <div className={`font-mono font-bold ${(perf.open.unrealized_pnl || 0) >= 0 ? "text-emerald-300" : "text-rose-300"}`}>
+                  €{(perf.open.unrealized_pnl || 0).toFixed(2)}
+                </div>
+              </div>
+              <div className="bg-slate-800/20 border border-slate-800 rounded-lg px-3 py-2">
+                <div className="text-xs text-slate-500">Avg Open Move</div>
+                <div className={`font-mono ${(perf.open.avg_move_pct || 0) >= 0 ? "text-emerald-300" : "text-rose-300"}`}>
+                  {perf.open.avg_move_pct != null ? `${perf.open.avg_move_pct > 0 ? "+" : ""}${perf.open.avg_move_pct}%` : "—"}
+                </div>
+              </div>
+              <div className="bg-slate-800/20 border border-slate-800 rounded-lg px-3 py-2">
+                <div className="text-xs text-slate-500">Best / Worst Open</div>
+                <div className="font-mono text-xs">
+                  <span className="text-emerald-300">+{(perf.open.best_pct ?? 0)}%</span>
+                  {" / "}
+                  <span className="text-rose-300">{(perf.open.worst_pct ?? 0)}%</span>
+                </div>
+              </div>
+              <div className="bg-slate-800/20 border border-slate-800 rounded-lg px-3 py-2">
+                <div className="text-xs text-slate-500">Exposure</div>
+                <div className="font-mono">€{(perf.open.exposure_eur || 0).toFixed(2)} · {perf.open.open_winners}/{perf.open.open_positions} green</div>
+              </div>
+            </div>
+          )}
+          {perf.closed?.edge_decay?.triggered && (
+            <div className="mt-3 px-4 py-3 rounded-xl border border-amber-500/40 bg-amber-500/10 text-amber-200 text-xs">
+              ⚠️ {perf.closed.edge_decay.message}
+            </div>
+          )}
+          {(perf.closed?.closed_trades ?? 0) === 0 && (perf.open?.open_positions ?? 0) === 0 && (
+            <div className="text-xs text-slate-500 text-center py-3">
+              No agent trades yet — stats appear once the agent opens positions.
+            </div>
+          )}
         </section>
       )}
 
